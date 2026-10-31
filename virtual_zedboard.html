@@ -1,0 +1,1478 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Virtual ZedBoard</title>
+<meta name="description" content="Interactive teaching simulation of a ZedBoard PWM LED design with a BTNC interrupt. A software model, not the physical board.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Barlow+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: board + guided lesson on top; a tabbed workbench beneath (console, math, slow motion, code, trace, system, quiz, glossary).
+   Treatment: lab bench instrument. The board stays dark in both themes, the page around it follows the theme. */
+:root {
+  --bg: #eef1ee;
+  --fg: #19211d;
+  --muted: #5b6760;
+  --line: #cfd6d1;
+  --card: #f9fbf9;
+  --card-2: #eef3ef;
+  --board: #16241d;
+  --board-2: #1d3027;
+  --board-line: #2f4a3d;
+  --board-fg: #dfe9e2;
+  --board-muted: #8fa89a;
+  --led-on: #ff5a3c;
+  --led-off: #3a1d19;
+  --led-glow: rgba(255, 90, 60, .85);
+  --accent: #0a7c5c;
+  --accent-fg: #ffffff;
+  --accent-soft: #d6efe5;
+  --warn: #a15c00;
+  --bad: #b3261e;
+  --good: #0a7c5c;
+  --term-bg: #101714;
+  --term-fg: #cfe7d8;
+  --term-dim: #7f968a;
+  --term-isr: #f2b84b;
+  --scope-bg: #101714;
+  --scope-grid: #25382f;
+  --scope-trace: #6ee7a8;
+  --scope-alt: #f2b84b;
+  --hot: rgba(242, 184, 75, .38);
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1310; --fg: #e4ece7; --muted: #97a79e; --line: #26352d; --card: #131c17; --card-2: #19241e;
+    --board-line: #35523f; --accent: #3ddc9b; --accent-fg: #06251a; --accent-soft: #15382b;
+    --warn: #f2b84b; --bad: #ff8a80; --good: #3ddc9b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1310; --fg: #e4ece7; --muted: #97a79e; --line: #26352d; --card: #131c17; --card-2: #19241e;
+  --board-line: #35523f; --accent: #3ddc9b; --accent-fg: #06251a; --accent-soft: #15382b;
+  --warn: #f2b84b; --bad: #ff8a80; --good: #3ddc9b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.wrap {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 24px; }
+header .titles { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 420px; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 34px; line-height: 1.05; letter-spacing: .01em; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0; max-width: 72ch; }
+.tag {
+  display: inline-block; font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--warn); border: 1px solid var(--warn); border-radius: 3px; padding: 1px 6px; margin-right: 8px; vertical-align: 2px;
+}
+.ctl { display: flex; flex-direction: column; gap: 4px; }
+.ctl > span { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--card); }
+.seg button {
+  appearance: none; border: 0; background: transparent; color: var(--fg); font: inherit; font-size: 13px; padding: 5px 12px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+button:focus-visible, select:focus-visible, input:focus-visible, .term:focus-visible, .tab:focus-visible, .node:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+.top { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+
+/* ---------- board ---------- */
+.pcb {
+  position: relative;
+  background: radial-gradient(circle at 15% 10%, rgba(255, 255, 255, .05), transparent 45%), var(--board);
+  color: var(--board-fg);
+  border: 2px solid var(--board-line);
+  border-radius: 16px;
+  padding: 26px 22px 18px;
+  display: flex; flex-direction: column; gap: 16px;
+  min-width: 0;
+}
+.hole { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: var(--bg); border: 2px solid var(--board-line); }
+.hole.tl { top: 9px; left: 9px; } .hole.tr { top: 9px; right: 9px; } .hole.bl { bottom: 9px; left: 9px; } .hole.br { bottom: 9px; right: 9px; }
+.pcb-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 14px; padding-inline: 14px; }
+.silk { font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--board-muted); }
+.stamp { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #ffd27a; border: 1px dashed #ffd27a; border-radius: 3px; padding: 2px 8px; }
+.pcb-top { display: flex; flex-wrap: wrap; gap: 10px; padding-inline: 14px; }
+.conn { background: #aeb8b3; color: #17211c; border-radius: 3px; height: 40px; min-width: 64px; padding: 3px 8px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; display: flex; align-items: flex-end; justify-content: center; }
+.conn.alt { background: #7f8c85; }
+.chip { flex: 1 1 160px; height: 40px; background: #0a110e; border: 1px solid var(--board-line); border-radius: 4px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; color: var(--board-muted); }
+.pcb-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px 26px; align-items: start; padding-inline: 14px; }
+.io { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.io > div { border: 1px solid var(--board-line); border-radius: 8px; padding: 12px 12px 14px; background: rgba(0, 0, 0, .12); min-width: 0; }
+.btns { display: grid; grid-template-columns: repeat(3, 60px); grid-template-rows: repeat(3, 60px); gap: 8px; justify-items: center; align-items: center; border: 1px solid var(--board-line); border-radius: 8px; padding: 12px; background: rgba(0, 0, 0, .12); }
+.pad { width: 46px; height: 46px; border-radius: 8px; border: 1px solid var(--board-line); background: #0f1a15; color: #5f7a6b; font-family: var(--font-mono); font-size: 9px; letter-spacing: .04em; display: grid; place-items: center; user-select: none; }
+.pcb .btnc { width: 60px; height: 60px; border-radius: 10px; font-size: 11px; }
+.pcb-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding-inline: 14px; }
+.pcb-foot .mode { width: auto; min-width: 180px; }
+.footctl { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.fineprint { font-family: var(--font-mono); font-size: 11px; color: var(--board-muted); padding-inline: 14px; margin: 0; }
+.board-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--board-muted); margin: 0 0 8px; display: flex; justify-content: space-between; gap: 8px; }
+.row8 { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+.led { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.led i {
+  --b: 0; display: block; width: 100%; max-width: 54px; aspect-ratio: 1.6 / 1; border-radius: 6px;
+  background: color-mix(in srgb, var(--led-on) calc(var(--b) * 100%), var(--led-off));
+  box-shadow: 0 0 calc(var(--b) * 26px) calc(var(--b) * 7px) color-mix(in srgb, var(--led-glow) calc(var(--b) * 100%), transparent), inset 0 1px 0 rgba(255, 255, 255, .12);
+  border: 1px solid rgba(0, 0, 0, .4);
+}
+.led b, .sw b { font-family: var(--font-mono); font-weight: 500; font-size: 11px; color: var(--board-muted); }
+.led span { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--board-fg); }
+.sw { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.sw button { appearance: none; width: 100%; max-width: 40px; height: 64px; border-radius: 5px; background: #0b1511; border: 1px solid var(--board-line); padding: 4px; cursor: pointer; display: flex; align-items: flex-start; }
+.sw button i { display: block; width: 100%; height: 26px; border-radius: 3px; background: #aab9b0; transition: transform .12s ease; transform: translateY(26px); }
+.sw button[aria-pressed="true"] i { transform: translateY(0); background: #e8f3ec; }
+.swline { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 10px; font-family: var(--font-mono); font-size: 12px; color: var(--board-muted); }
+.swline strong { color: var(--board-fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset { appearance: none; font: inherit; font-family: var(--font-mono); font-size: 12px; color: var(--board-fg); background: transparent; border: 1px solid var(--board-line); border-radius: 4px; padding: 2px 9px; cursor: pointer; }
+.preset:hover { background: var(--board-2); }
+.btnc {
+  appearance: none; width: 108px; height: 108px; border-radius: 50%; border: 1px solid var(--board-line);
+  background: radial-gradient(circle at 40% 32%, #3a4f44, #1c2b24 70%); color: var(--board-fg);
+  font-family: var(--font-mono); font-size: 13px; letter-spacing: .08em; cursor: pointer;
+  box-shadow: 0 5px 0 #0b1511, 0 8px 14px rgba(0, 0, 0, .35); transition: transform .06s ease, box-shadow .06s ease;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.btnc.down { transform: translateY(4px); box-shadow: 0 1px 0 #0b1511, 0 3px 6px rgba(0, 0, 0, .35); background: radial-gradient(circle at 40% 32%, #4a6a58, #22372d 70%); }
+.chk { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--board-muted); cursor: pointer; text-align: left; position: relative; }
+.chk input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.chk span { width: 16px; height: 16px; flex: none; border: 1px solid var(--board-muted); border-radius: 3px; display: inline-grid; place-items: center; }
+.chk input:checked + span { background: var(--accent); border-color: var(--accent); }
+.chk input:checked + span::after { content: ""; width: 8px; height: 4px; border-left: 2px solid var(--accent-fg); border-bottom: 2px solid var(--accent-fg); transform: rotate(-45deg) translate(1px, -1px); }
+.chk input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mode { width: 100%; text-align: center; font-family: var(--font-display); font-weight: 600; font-size: 22px; letter-spacing: .08em; padding: 4px 0 2px; border-radius: 4px; background: var(--board-2); border: 1px solid var(--board-line); }
+.mode small { display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--board-muted); font-weight: 400; }
+.selrow { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--board-muted); flex-wrap: wrap; }
+.selrow select { font: inherit; font-size: 12.5px; background: #0b1511; color: var(--board-fg); border: 1px solid var(--board-line); border-radius: 4px; padding: 3px 6px; max-width: 100%; }
+.minibtn { appearance: none; font: inherit; font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--board-fg); background: transparent; border: 1px solid var(--board-line); border-radius: 4px; padding: 3px 9px; cursor: pointer; }
+.minibtn:hover { background: var(--board-2); }
+
+/* ---------- lesson ---------- */
+.lesson { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.lesson h2 { margin: 0; }
+.dots { display: flex; gap: 6px; flex-wrap: wrap; }
+.dots button {
+  appearance: none; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: var(--card-2); color: var(--muted);
+  font-family: var(--font-mono); font-size: 11px; cursor: pointer; padding: 0;
+}
+.dots button[aria-current="step"] { border-color: var(--accent); color: var(--fg); box-shadow: 0 0 0 2px var(--accent-soft); }
+.dots button.done { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.ltitle { font-family: var(--font-display); font-size: 26px; font-weight: 600; line-height: 1.1; margin: 2px 0 0; text-wrap: balance; }
+.lrow { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 4px 10px; font-size: 14px; }
+.lrow b { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding-top: 3px; }
+.lrow p { margin: 0; }
+.lstatus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 10px; border-radius: 8px; background: var(--card-2); border: 1px solid var(--line); font-size: 13.5px; }
+.lstatus.ok { background: var(--accent-soft); border-color: var(--accent); }
+.lstatus .mark { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.lstatus.ok .mark { color: var(--good); font-weight: 600; }
+.lnav { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  appearance: none; font: inherit; font-size: 13px; border-radius: 6px; padding: 6px 12px; cursor: pointer;
+  background: var(--card); color: var(--fg); border: 1px solid var(--line);
+}
+.btn:hover { background: var(--card-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn[disabled] { opacity: .45; cursor: default; }
+
+/* ---------- cards, tabs ---------- */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.card h2, h2.cap {
+  margin: 0 0 10px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+.linkbtn { appearance: none; background: none; border: 0; color: var(--accent); font: inherit; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; padding: 0; }
+.tabcard { padding: 0; overflow: hidden; }
+.tablist { display: flex; flex-wrap: wrap; gap: 0; border-bottom: 1px solid var(--line); background: var(--card-2); padding-inline: 8px; }
+.tab { appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13.5px; padding: 11px 12px 9px; cursor: pointer; border-bottom: 3px solid transparent; }
+.tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 500; }
+.tab:hover { color: var(--fg); }
+.tabpanel { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.cols2 { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sect { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--card); min-width: 0; }
+.lead { margin: 0; color: var(--muted); max-width: 78ch; }
+.term { background: var(--term-bg); color: var(--term-fg); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; border-radius: 6px; padding: 10px 12px; height: 330px; overflow: auto; white-space: pre; }
+.term .isr { color: var(--term-isr); }
+.term .dim { color: var(--term-dim); }
+.term .warn { color: #ff9a8f; }
+table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+tr:last-child td { border-bottom: 0; }
+.tbl { overflow: auto; max-width: 100%; }
+.tbl.tall { max-height: 380px; }
+canvas { display: block; width: 100%; background: var(--scope-bg); border-radius: 6px; }
+#scope { height: 150px; }
+#slowcv { height: 250px; }
+.scopeinfo { display: flex; flex-wrap: wrap; gap: 4px 16px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); margin-top: 8px; }
+.scopeinfo strong { color: var(--fg); font-weight: 500; }
+.notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; }
+.notes b { color: var(--fg); font-weight: 500; }
+code, .mono { font-family: var(--font-mono); font-size: .92em; }
+.math { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; counter-reset: m; }
+.math li { counter-increment: m; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 2px 10px; }
+.math li::before {
+  content: counter(m); width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--fg);
+  display: grid; place-items: center; font-family: var(--font-mono); font-size: 12px; margin-top: 2px;
+}
+.math .eq { font-family: var(--font-mono); font-size: 14px; background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; overflow-wrap: anywhere; line-height: 1.45; }
+.math .why { color: var(--muted); font-size: 13.5px; margin: 2px 0 0; }
+.bar { height: 16px; background: var(--card-2); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; display: flex; }
+.bar i { display: block; height: 100%; background: var(--scope-trace); }
+.bar i + i { background: transparent; }
+.calc { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; }
+.calc label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); font-family: var(--font-mono); letter-spacing: .04em; }
+.calc input { font: inherit; font-family: var(--font-mono); width: 120px; padding: 5px 7px; border-radius: 5px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+.calcout { font-family: var(--font-mono); font-size: 13px; background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; flex: 1 1 260px; }
+.ctrls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.ctrls label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ctrls input[type=range] { width: 150px; accent-color: var(--accent); }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.readout strong { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* code */
+.codewrap { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.code { background: var(--term-bg); color: var(--term-fg); border-radius: 6px; padding: 8px 0; overflow: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.55; }
+.code .ln { display: block; white-space: pre; padding: 0 12px; transition: background .9s ease; }
+.code .ln.hot { background: var(--hot); transition: none; }
+.code .ln.new { box-shadow: inset 3px 0 0 var(--scope-alt); }
+.codehead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 12px; margin-bottom: 6px; font-size: 13px; }
+.codehead strong { font-weight: 500; }
+
+/* system */
+.sysbox { background: var(--card-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; overflow-x: auto; }
+.sysbox svg { display: block; width: 100%; min-width: 620px; height: auto; font-family: var(--font-mono); }
+.node { cursor: pointer; }
+.node rect { fill: var(--card); stroke: var(--line); stroke-width: 1.5; transition: fill .3s, stroke .3s; }
+.node.group rect { fill: var(--card-2); }
+.node.on rect, .node.sel rect { stroke: var(--accent); stroke-width: 2.5; }
+.node.on rect { fill: var(--accent-soft); }
+.node text { fill: var(--fg); font-size: 11.5px; pointer-events: none; }
+.node text.s { fill: var(--muted); font-size: 10px; }
+.wire { fill: none; stroke: var(--muted); stroke-width: 1.6; opacity: .75; transition: stroke .2s, opacity .2s; }
+.wire.irq { stroke-dasharray: 5 4; }
+.wire.on { stroke: var(--accent); stroke-width: 3.5; opacity: 1; }
+.wlabel { fill: var(--muted); font-size: 10px; }
+.sysinfo { min-height: 4.5em; }
+.sysinfo h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.sysinfo p { margin: 0; color: var(--muted); }
+
+/* quiz */
+.qs { display: flex; flex-direction: column; gap: 12px; }
+.q { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; background: var(--card); }
+.q p.qt { margin: 0 0 8px; font-weight: 500; }
+.opts { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.opt { appearance: none; font: inherit; font-size: 14px; text-align: left; background: var(--card-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; max-width: 100%; }
+.opt:hover:not([disabled]) { border-color: var(--accent); }
+.opt.right { background: var(--accent-soft); border-color: var(--good); }
+.opt.wrong { border-color: var(--bad); }
+.opt[disabled] { cursor: default; }
+.fb { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); }
+.fb b.ok { color: var(--good); } .fb b.no { color: var(--bad); }
+.qrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.qrow input { font: inherit; font-family: var(--font-mono); width: 100px; padding: 5px 7px; border-radius: 5px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+.score { font-family: var(--font-mono); font-size: 13px; }
+
+/* glossary */
+dl.gl { margin: 0; display: grid; grid-template-columns: minmax(120px, 190px) minmax(0, 1fr); gap: 10px 16px; }
+dl.gl dt { font-family: var(--font-mono); font-size: 13px; font-weight: 500; }
+dl.gl dd { margin: 0; color: var(--muted); }
+.compare { width: 100%; }
+.compare td:first-child { width: 36%; font-family: var(--font-body); }
+.compare td { font-family: var(--font-body); font-size: 13.5px; }
+footer { color: var(--muted); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .top { grid-template-columns: minmax(0, 1fr); }
+  .lesson { position: static; }
+  .cols2, .codewrap { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .pcb-main { grid-template-columns: minmax(0, 1fr); }
+  .btns { justify-self: center; }
+  .pcb { padding-inline: 14px; }
+  .pcb-head, .pcb-top, .pcb-main, .pcb-foot, .fineprint { padding-inline: 4px; }
+  h1 { font-size: 30px; }
+  dl.gl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  dl.gl dd { margin-bottom: 8px; }
+  .tabpanel { padding: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw button i, .btnc, .code .ln, .node rect, .wire { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="titles">
+      <h1>Virtual ZedBoard</h1>
+      <p class="sub"><span class="tag">Simulation</span>Switch-controlled PWM LED brightness with a push-button interrupt. A software model of the PWM IP, the AXI registers and the C application, built for learning. It is not the physical board and not a recording of one.</p>
+    </div>
+    <div class="ctl">
+      <span id="scaleLbl">Time scale</span>
+      <div class="seg" role="group" aria-labelledby="scaleLbl">
+        <button type="button" id="scReal" aria-pressed="true" title="PERIOD = 100000, 1 kHz: the real design">Real design · 1 kHz</button>
+        <button type="button" id="scSim" aria-pressed="false" title="PERIOD = 1000, 100 kHz: the value used in the Vivado testbenches">Testbench · 100×</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="top">
+    <section class="pcb" aria-label="Virtual ZedBoard, top view illustration">
+      <i class="hole tl"></i><i class="hole tr"></i><i class="hole bl"></i><i class="hole br"></i>
+      <div class="pcb-head">
+        <span class="silk">Virtual ZedBoard · top view</span>
+        <span class="stamp">Simulation · not the physical board</span>
+      </div>
+      <div class="pcb-top" aria-hidden="true">
+        <div class="conn">PROG</div>
+        <div class="conn">UART</div>
+        <div class="chip">ZYNQ-7000 · XC7Z020-1CLG484</div>
+        <div class="conn alt">DDR3</div>
+      </div>
+      <div class="pcb-main">
+        <div class="io">
+          <div>
+            <p class="board-label"><span>User LEDs LD7 – LD0</span><span id="ledHdr">PWM 1 kHz · 8 channels</span></p>
+            <div class="row8" id="leds"></div>
+          </div>
+          <div>
+            <p class="board-label"><span>Slide switches SW7 – SW0</span><span>tap to flip</span></p>
+            <div class="row8" id="switches"></div>
+            <div class="swline">
+              <span>value <strong id="swDec">0</strong> / 255</span>
+              <span>binary <strong id="swBin">00000000</strong></span>
+              <span class="presets" id="presets" aria-label="Switch presets"></span>
+            </div>
+          </div>
+        </div>
+        <div class="btns" aria-label="Push buttons">
+          <span></span><span class="pad" title="Not used in this lab">BTNU</span><span></span>
+          <span class="pad" title="Not used in this lab">BTNL</span>
+          <button class="btnc" id="btnc" type="button" aria-label="BTNC centre push button. Hold to press.">BTNC</button>
+          <span class="pad" title="Not used in this lab">BTNR</span>
+          <span></span><span class="pad" title="Not used in this lab">BTND</span><span></span>
+        </div>
+      </div>
+      <div class="pcb-foot">
+        <div class="mode" id="modeBadge">MANUAL<small>MODE 0</small></div>
+        <div class="footctl">
+          <label class="chk"><input type="checkbox" id="bounce" checked><span></span>Simulate contact bounce on BTNC</label>
+          <div class="selrow">
+            <label for="isrVar">ISR debounce version</label>
+            <select id="isrVar">
+              <option value="B">B · restart window on every edge (recommended)</option>
+              <option value="A">A · as built in main.c</option>
+            </select>
+          </div>
+          <button class="minibtn" id="resetBoard" type="button">Reset board</button>
+        </div>
+      </div>
+      <p class="fineprint">Stylised illustration drawn for this lab. Only BTNC and the switches are used by the design.</p>
+    </section>
+
+    <aside class="card lesson" id="lesson" aria-label="Guided lessons">
+      <h2><span>Guided lesson <span id="lnum">1 / 7</span></span></h2>
+      <div class="dots" id="dots" role="group" aria-label="Lessons"></div>
+      <p class="ltitle" id="ltitle"></p>
+      <div class="lrow"><b>Idea</b><p id="lgoal"></p></div>
+      <div class="lrow"><b>Try</b><p id="ldo"></p></div>
+      <div class="lrow"><b>Watch</b><p id="lwatch"></p></div>
+      <div class="lstatus" id="lstatus"><span class="mark" id="lmark">Waiting for you…</span><button class="btn" id="lopen" type="button"></button></div>
+      <div class="lnav">
+        <button class="btn" id="lprev" type="button">Back</button>
+        <button class="btn primary" id="lnext" type="button">Next lesson</button>
+      </div>
+    </aside>
+  </div>
+
+  <section class="card tabcard" aria-label="Workbench">
+    <div class="tablist" role="tablist" id="tablist" aria-label="Workbench views">
+      <button class="tab" role="tab" id="t-console" data-tab="console" aria-selected="true" aria-controls="p-console">Console &amp; scope</button>
+      <button class="tab" role="tab" id="t-math" data-tab="math" aria-selected="false" aria-controls="p-math" tabindex="-1">Show me the math</button>
+      <button class="tab" role="tab" id="t-slow" data-tab="slow" aria-selected="false" aria-controls="p-slow" tabindex="-1">Slow motion</button>
+      <button class="tab" role="tab" id="t-code" data-tab="code" aria-selected="false" aria-controls="p-code" tabindex="-1">Code</button>
+      <button class="tab" role="tab" id="t-trace" data-tab="trace" aria-selected="false" aria-controls="p-trace" tabindex="-1">Register writes</button>
+      <button class="tab" role="tab" id="t-system" data-tab="system" aria-selected="false" aria-controls="p-system" tabindex="-1">System</button>
+      <button class="tab" role="tab" id="t-quiz" data-tab="quiz" aria-selected="false" aria-controls="p-quiz" tabindex="-1">Check yourself</button>
+      <button class="tab" role="tab" id="t-gloss" data-tab="gloss" aria-selected="false" aria-controls="p-gloss" tabindex="-1">Glossary &amp; limits</button>
+    </div>
+
+    <!-- Console & scope -->
+    <div class="tabpanel" role="tabpanel" id="p-console" aria-labelledby="t-console">
+      <div class="cols2">
+        <section class="sect">
+          <h2 class="cap"><span>UART console · 115200 8-N-1</span><button class="linkbtn" id="clear" type="button">Clear</button></h2>
+          <div class="term" id="term" role="log" aria-live="off" tabindex="0"></div>
+        </section>
+        <div class="stack">
+          <section class="sect">
+            <h2 class="cap"><span>PWM IP registers</span><span>base 0x43C0_0000</span></h2>
+            <div class="tbl">
+              <table>
+                <thead><tr><th>Offset</th><th>Register</th><th>Value</th></tr></thead>
+                <tbody>
+                  <tr><td>0x00</td><td>CTRL</td><td id="rCtrl">0x00000001</td></tr>
+                  <tr><td>0x04</td><td>PERIOD</td><td id="rPeriod">0x000186A0</td></tr>
+                  <tr><td>0x08</td><td>DUTY_LO</td><td id="rLo">0x00000000</td></tr>
+                  <tr><td>0x0C</td><td>DUTY_HI</td><td id="rHi">0x00000000</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section class="sect">
+            <h2 class="cap"><span>LED0 output pin</span><span>3 periods</span></h2>
+            <canvas id="scope" aria-label="PWM waveform of LED0"></canvas>
+            <div class="scopeinfo">
+              <span>duty <strong id="scDuty">0.0 %</strong></span>
+              <span>high time <strong id="scHigh">0 µs</strong></span>
+              <span>period <strong id="scPeriod">1 ms</strong></span>
+            </div>
+          </section>
+        </div>
+      </div>
+      <ul class="notes">
+        <li><b>PWM IP:</b> a counter runs to PERIOD (100000 clocks at 100 MHz, 1 kHz). Each channel is high while the counter is below duty × PERIOD / 256, and fully on at duty 255.</li>
+        <li><b>Mode 0, manual:</b> the main loop reads the switches (0–255), writes DUTY_LO and DUTY_HI, and prints the status line.</li>
+        <li><b>Mode 1, breathing:</b> the main loop ramps the duty up and down in 4 ms steps with a squared curve.</li>
+        <li><b>BTNC interrupt:</b> the ISR runs on every button edge. It toggles the mode on a press only when the button has been quiet for 100 ms, so bounce spikes are ignored.</li>
+        <li><b>Display:</b> LED glow uses a perceptual curve so low duty values stay visible. The waveform and percentages are exact.</li>
+      </ul>
+    </div>
+
+    <!-- Math -->
+    <div class="tabpanel" role="tabpanel" id="p-math" aria-labelledby="t-math" hidden>
+      <p class="lead">How one LED's brightness is computed, live. It follows LD0, so flip a switch or switch to breathing mode and watch the numbers change.</p>
+      <div class="cols2">
+        <section class="sect">
+          <h2 class="cap"><span>From switches to output pin</span><span id="mathWho">LD0</span></h2>
+          <ol class="math" id="mathList">
+            <li><div><div class="eq" id="mEq1"></div><p class="why" id="mWhy1"></p></div></li>
+            <li><div><div class="eq" id="mEq2"></div><p class="why" id="mWhy2"></p></div></li>
+            <li><div><div class="eq" id="mEq3"></div><div class="bar" aria-hidden="true"><i id="mBarHi"></i><i id="mBarLo"></i></div><p class="why" id="mWhy3"></p></div></li>
+            <li><div><div class="eq" id="mEq4"></div><p class="why" id="mWhy4"></p></div></li>
+            <li><div><div class="eq" id="mEq5"></div><p class="why" id="mWhy5"></p></div></li>
+          </ol>
+        </section>
+        <section class="sect">
+          <h2 class="cap"><span>Try your own numbers</span><span>does not touch the board</span></h2>
+          <div class="calc">
+            <label>duty byte d (0–255)<input id="calcD" type="number" min="0" max="255" value="64" inputmode="numeric"></label>
+            <label>PERIOD (clocks)<input id="calcP" type="number" min="1" max="100000000" value="100000" inputmode="numeric"></label>
+          </div>
+          <p class="calcout" id="calcOut" style="margin:10px 0 0"></p>
+          <p class="why" style="margin:10px 0 0;color:var(--muted);font-size:13.5px">Each clock is 10 ns (100 MHz). The threshold is rounded down, which is why 1/256 steps never add up to more than a 0.4 % error.</p>
+        </section>
+      </div>
+    </div>
+
+    <!-- Slow motion -->
+    <div class="tabpanel" role="tabpanel" id="p-slow" aria-labelledby="t-slow" hidden>
+      <p class="lead">The real counter takes 100000 steps per period, far too fast to see. Here one period is drawn as <strong>64 steps</strong> (threshold = d × 64 / 256) so you can follow the counter, the comparison and the output pin tick by tick. It follows the current LD0 duty.</p>
+      <div class="ctrls">
+        <button class="btn primary" id="smPlay" type="button">Play</button>
+        <button class="btn" id="smStep" type="button">Step</button>
+        <button class="btn" id="smStep8" type="button">Step ×8</button>
+        <button class="btn" id="smReset" type="button">Reset</button>
+        <label>speed <input id="smRate" type="range" min="2" max="60" value="12"><span id="smRateV">12 steps/s</span></label>
+      </div>
+      <canvas id="slowcv" aria-label="Counter, threshold and output pin in slow motion"></canvas>
+      <div class="readout" aria-live="off">
+        <span>counter <strong id="smC">–</strong></span>
+        <span>threshold <strong id="smT">–</strong></span>
+        <span>counter &lt; threshold? <strong id="smO">–</strong></span>
+        <span>output pin <strong id="smPin">–</strong></span>
+      </div>
+      <p class="lead" id="smNote"></p>
+    </div>
+
+    <!-- Code -->
+    <div class="tabpanel" role="tabpanel" id="p-code" aria-labelledby="t-code" hidden>
+      <p class="lead">The C code behind the simulation. Lines light up when the simulated program runs them: press BTNC and watch the ISR, flip a switch and watch the main loop write the registers.</p>
+      <div class="codewrap">
+        <div>
+          <div class="codehead"><strong>BtnIsr()</strong><span id="isrTag" class="mono" style="color:var(--muted)"></span></div>
+          <div class="code" id="codeIsr" aria-label="Interrupt service routine"></div>
+          <p class="lead" id="isrNote" style="margin-top:8px;font-size:13.5px"></p>
+        </div>
+        <div class="stack">
+          <div>
+            <div class="codehead"><strong>main loop</strong><span class="mono" style="color:var(--muted)">main.c</span></div>
+            <div class="code" id="codeMain" aria-label="Main loop"></div>
+          </div>
+          <div>
+            <div class="codehead"><strong>pwm_set_all()</strong><span class="mono" style="color:var(--muted)">two AXI writes</span></div>
+            <div class="code" id="codeSet" aria-label="pwm_set_all"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Register trace -->
+    <div class="tabpanel" role="tabpanel" id="p-trace" aria-labelledby="t-trace" hidden>
+      <p class="lead">Every write the PS makes to the PWM IP over AXI4-Lite, newest first, with the register decoded and the line of C that caused it. In breathing mode only every 8th pair of writes is listed, otherwise the list would scroll away.</p>
+      <div class="ctrls">
+        <button class="btn" id="trPause" type="button">Pause</button>
+        <button class="btn" id="trClear" type="button">Clear</button>
+        <span class="readout"><span>writes so far <strong id="trCount">0</strong></span></span>
+      </div>
+      <div class="tbl tall">
+        <table>
+          <thead><tr><th>Time</th><th>Write</th><th>Decoded</th><th>Caused by</th></tr></thead>
+          <tbody id="trBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- System -->
+    <div class="tabpanel" role="tabpanel" id="p-system" aria-labelledby="t-system" hidden>
+      <p class="lead">Click any block to read what it does. Wires light up as the simulation uses them: flip a switch, press BTNC, or let breathing mode run.</p>
+      <div class="sysbox">
+        <svg id="sysSvg" viewBox="0 0 780 390" role="img" aria-label="System block diagram: Zynq PS, AXI interconnect, PWM controller, two AXI GPIOs, switches, LEDs, BTNC and the interrupt path"></svg>
+      </div>
+      <div class="sect sysinfo" id="sysInfo" aria-live="polite"><h3>Zynq system</h3><p>Click a block to see its role, address and how this simulation uses it.</p></div>
+    </div>
+
+    <!-- Quiz -->
+    <div class="tabpanel" role="tabpanel" id="p-quiz" aria-labelledby="t-quiz" hidden>
+      <div class="qrow"><span class="score" id="qScore">Score 0 / 0</span><button class="btn" id="qReset" type="button">Start over</button></div>
+      <div class="qs" id="qs"></div>
+    </div>
+
+    <!-- Glossary -->
+    <div class="tabpanel" role="tabpanel" id="p-gloss" aria-labelledby="t-gloss" hidden>
+      <section class="sect">
+        <h2 class="cap"><span>Simulation versus the real board</span></h2>
+        <div class="tbl">
+          <table class="compare">
+            <thead><tr><th>Topic</th><th>This page</th><th>Real ZedBoard</th></tr></thead>
+            <tbody>
+              <tr><td>PWM output</td><td>Computed from the register values with the same formula as the RTL.</td><td>An FPGA counter and comparators toggle pins every 10 ns.</td></tr>
+              <tr><td>Software</td><td>JavaScript re-implementation of main.c. It does not run the compiled program.</td><td>The Cortex-A9 runs the C binary.</td></tr>
+              <tr><td>Interrupt timing</td><td>Handled immediately in the browser.</td><td>GIC latency, a few microseconds; the ISR runs between main-loop instructions.</td></tr>
+              <tr><td>Button bounce</td><td>A fixed pattern of edges, about 10 ms.</td><td>Depends on the individual switch, from under 1 ms to over 10 ms.</td></tr>
+              <tr><td>LED brightness</td><td>Drawn with a perceptual curve so low values stay visible.</td><td>Your eye averages the 1 kHz flicker.</td></tr>
+              <tr><td>Evidence</td><td>Teaching aid only. The verification is in the Vivado testbenches and the C model.</td><td>Needs the bitstream, a UART terminal and the physical switches.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="sect">
+        <h2 class="cap"><span>Glossary</span></h2>
+        <dl class="gl" id="glist"></dl>
+      </section>
+    </div>
+  </section>
+
+  <footer>Made for the HW/SW co-design lab (ZedBoard, Zynq-7000). Everything on this page is a software simulation of the design.</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ===================== constants (same as the lab design) ===================== */
+  var CLK_HZ = 100e6;
+  var REAL_PERIOD = 100000, SIM_PERIOD = 1000;
+  var DEBOUNCE_MS = 100, BREATH_STEP_MS = 4, MANUAL_POLL_MS = 5;
+  var T0 = performance.now();
+  function pt() { return performance.now() - T0; }
+
+  /* ===================== model state ===================== */
+  var regs = { ctrl: 1, period: REAL_PERIOD, lo: 0, hi: 0 };
+  var sw = 0, mode = 0, modeChanged = true;
+  var lastEvent = -1e9, physPressed = false, isrVariant = "B", scaled = false;
+  var ev = { swSets: 0, accepted: 0, ignoredRise: 0, doubleToggle: 0, maxBreath: 0, slowSteps: 0, tabs: {} };
+
+  function fmtTime(us) {
+    if (us >= 1000) return parseFloat((us / 1000).toFixed(3)) + " ms";
+    if (us >= 1) return parseFloat(us.toFixed(3)) + " µs";
+    return parseFloat((us * 1000).toFixed(1)) + " ns";
+  }
+  function fmtHz(f) {
+    if (f >= 1e6) return parseFloat((f / 1e6).toFixed(2)) + " MHz";
+    if (f >= 1e3) return parseFloat((f / 1e3).toFixed(2)) + " kHz";
+    return parseFloat(f.toFixed(2)) + " Hz";
+  }
+  function periodUs() { return regs.period * 10 / 1000; }           /* 10 ns per clock */
+  function hex(v) { return "0x" + ("00000000" + (v >>> 0).toString(16).toUpperCase()).slice(-8); }
+  function setText(el, s) { if (el.textContent !== s) el.textContent = s; }
+
+  /* ===================== diagram wire flashing ===================== */
+  var pulseAt = {};
+  function pulse(ids, minGap) {
+    var now = performance.now();
+    ids.forEach(function (id) {
+      if (pulseAt[id] && now - pulseAt[id] < (minGap || 160)) return;
+      pulseAt[id] = now;
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.classList.add("on");
+      clearTimeout(el._t);
+      el._t = setTimeout(function () { el.classList.remove("on"); }, 450);
+    });
+  }
+
+  /* ===================== code view ===================== */
+  var CODE = {
+    isrB: [
+      ["static void BtnIsr(void *CallbackRef)", ""],
+      ["{", ""],
+      ["    XGpio *g = (XGpio *)CallbackRef;", ""],
+      ["    XGpio_InterruptDisable(g, XGPIO_IR_CH1_MASK);", "entry"],
+      ["    if (XGpio_InterruptGetStatus(g) & XGPIO_IR_CH1_MASK) {", "entry"],
+      ["        u32 pressed = XGpio_DiscreteRead(g, 1) & 0x1;", "read"],
+      ["        u32 now     = GTIMER_LOW;           /* free-running timer */", "read"],
+      ["        u32 quiet   = (now - g_last_press) > DEBOUNCE_TICKS;  /* 100 ms */", "test"],
+      ["        g_last_press = now;      /* EVERY edge restarts the quiet window */", "last new"],
+      ["        if (pressed && quiet) {", "test"],
+      ["            g_mode ^= 1u;        /* Manual <-> Breathing */", "toggle"],
+      ["            g_mode_changed = 1;", "toggle"],
+      ["        }", ""],
+      ["    }", ""],
+      ["    XGpio_InterruptClear(g, XGPIO_IR_CH1_MASK);", "exit"],
+      ["    XGpio_InterruptEnable(g, XGPIO_IR_CH1_MASK);", "exit"],
+      ["}", ""]
+    ],
+    isrA: [
+      ["static void BtnIsr(void *CallbackRef)", ""],
+      ["{", ""],
+      ["    XGpio *g = (XGpio *)CallbackRef;", ""],
+      ["    XGpio_InterruptDisable(g, XGPIO_IR_CH1_MASK);", "entry"],
+      ["    if (XGpio_InterruptGetStatus(g) & XGPIO_IR_CH1_MASK) {", "entry"],
+      ["        u32 pressed = XGpio_DiscreteRead(g, 1) & 0x1;", "read"],
+      ["        u32 now     = GTIMER_LOW;           /* free-running timer */", "read"],
+      ["        if (pressed && ((now - g_last_press) > DEBOUNCE_TICKS)) {", "test"],
+      ["            g_last_press = now;  /* only an ACCEPTED press restarts it */", "toggle new"],
+      ["            g_mode ^= 1u;        /* Manual <-> Breathing */", "toggle"],
+      ["            g_mode_changed = 1;", "toggle"],
+      ["        }", ""],
+      ["    }", ""],
+      ["    XGpio_InterruptClear(g, XGPIO_IR_CH1_MASK);", "exit"],
+      ["    XGpio_InterruptEnable(g, XGPIO_IR_CH1_MASK);", "exit"],
+      ["}", ""]
+    ],
+    main: [
+      ["while (1) {", ""],
+      ["    if (g_mode == 0) {                          /* MANUAL */", "m_if"],
+      ["        u32 sw = XGpio_DiscreteRead(&GpioSw, 1) & 0xFF;", "m_read"],
+      ["        if (sw != last_sw || g_mode_changed) {", "m_read"],
+      ["            pwm_set_all(sw);", "m_write"],
+      ["            print_status(0, sw);   /* \"Mode: MANUAL | Duty: n\" */", "m_print"],
+      ["            last_sw = sw;  g_mode_changed = 0;", ""],
+      ["        }", ""],
+      ["        usleep(5000);", "m_wait"],
+      ["    } else {                                    /* BREATHING */", "b_if"],
+      ["        if (g_mode_changed) { breath = 0; dir = 1;", "b_init"],
+      ["            print_status(1, 0);  g_mode_changed = 0; }", "b_init"],
+      ["        pwm_set_all((u32)(breath * breath) / 255u);", "b_write"],
+      ["        breath += dir;                          /* ramp */", "b_step"],
+      ["        if (breath >= 255) { breath = 255; dir = -1; }", "b_step"],
+      ["        if (breath <= 0)   { breath = 0;   dir =  1; }", "b_step"],
+      ["        if ((++tick & 0x3F) == 0) print_status(1, breath);", "b_print"],
+      ["        usleep(4000);", "b_wait"],
+      ["    }", ""],
+      ["}", ""]
+    ],
+    set: [
+      ["static void pwm_set_all(u32 duty8)", ""],
+      ["{", ""],
+      ["    u32 packed = (duty8 & 0xFF) * 0x01010101u;  /* same byte in 4 lanes */", ""],
+      ["    pwm_write(PWM_REG_DUTY_LO, packed);          /* LD3..LD0 */", "w_lo"],
+      ["    pwm_write(PWM_REG_DUTY_HI, packed);          /* LD7..LD4 */", "w_hi"],
+      ["}", ""]
+    ]
+  };
+  var codeEls = { isr: $("codeIsr"), main: $("codeMain"), set: $("codeSet") };
+  function renderCode(box, lines) {
+    box.textContent = "";
+    lines.forEach(function (l) {
+      var s = document.createElement("span");
+      s.className = "ln"; s.textContent = l[0] || " ";
+      s.setAttribute("data-k", l[1]);
+      box.appendChild(s);
+    });
+  }
+  function renderIsr() {
+    renderCode(codeEls.isr, isrVariant === "A" ? CODE.isrA : CODE.isrB);
+    $("isrTag").textContent = isrVariant === "A" ? "version A · as built (2025.2 build uses GTIMER_LOW)" : "version B · main_sim.c, recommended";
+    $("isrNote").textContent = isrVariant === "A"
+      ? "Version A only restarts the quiet window when a press is accepted. After a long press, bounce on the release can look like a fresh press and toggle the mode again."
+      : "Version B restarts the quiet window on every edge, including the release, so the bounce that follows a release is ignored too.";
+  }
+  renderCode(codeEls.main, CODE.main);
+  renderCode(codeEls.set, CODE.set);
+  renderIsr();
+  function hl(which, keys) {
+    var box = codeEls[which];
+    var lines = box.children;
+    for (var i = 0; i < lines.length; i++) {
+      var k = (lines[i].getAttribute("data-k") || "").split(" ");
+      var hit = false;
+      for (var j = 0; j < keys.length; j++) if (k.indexOf(keys[j]) >= 0) hit = true;
+      if (hit) {
+        (function (el) {
+          el.classList.add("hot");
+          clearTimeout(el._t);
+          el._t = setTimeout(function () { el.classList.remove("hot"); }, 70);
+        })(lines[i]);
+      }
+    }
+  }
+
+  /* ===================== UART console ===================== */
+  var term = $("term");
+  function print(text, cls) {
+    var el = document.createElement("div");
+    if (cls) el.className = cls;
+    el.textContent = text;
+    var stick = term.scrollTop + term.clientHeight >= term.scrollHeight - 24;
+    term.appendChild(el);
+    while (term.childNodes.length > 300) term.removeChild(term.firstChild);
+    if (stick) term.scrollTop = term.scrollHeight;
+  }
+  function status(m, d) { print("Mode: " + (m ? "BREATHING" : "MANUAL") + " | Duty: " + d); }
+  $("clear").addEventListener("click", function () { term.textContent = ""; });
+
+  /* ===================== PWM IP register file + trace ===================== */
+  var OFFS = { ctrl: 0x00, period: 0x04, lo: 0x08, hi: 0x0C };
+  var NAMES = { ctrl: "CTRL", period: "PERIOD", lo: "DUTY_LO", hi: "DUTY_HI" };
+  var trace = { paused: false, total: 0, rows: 0 };
+  function decode(name, v) {
+    if (name === "ctrl") return "enable = " + (v & 1);
+    if (name === "period") return v + " clocks → " + fmtHz(CLK_HZ / v) + " PWM";
+    var b = [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+    var base = name === "lo" ? 0 : 4;
+    return "LD" + (base + 3) + " … LD" + base + " = " + b[3] + ", " + b[2] + ", " + b[1] + ", " + b[0];
+  }
+  function addTrace(name, v, why) {
+    var body = $("trBody");
+    var tr = document.createElement("tr");
+    var cells = [(pt() / 1000).toFixed(3) + " s", "0x" + ("0" + OFFS[name].toString(16).toUpperCase()).slice(-2) + " " + NAMES[name] + " ← " + hex(v), decode(name, v), why];
+    cells.forEach(function (c) { var td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+    body.insertBefore(tr, body.firstChild);
+    trace.rows++;
+    while (trace.rows > 60) { body.removeChild(body.lastChild); trace.rows--; }
+  }
+  function pwmWrite(name, v, why, silent) {
+    regs[name] = v >>> 0;
+    trace.total++;
+    pulse(["w_bus", "w_pwm", "w_pwmio"]);
+    if (!silent && !trace.paused) addTrace(name, regs[name], why);
+  }
+  function pwmSetAll(d8, why, silent) {
+    var packed = ((d8 & 255) * 0x01010101) >>> 0;
+    pwmWrite("lo", packed, why, silent);
+    pwmWrite("hi", packed, why, silent);
+    if (!silent) hl("set", ["w_lo", "w_hi"]);
+  }
+  function chDuty(ch) { return ((ch < 4 ? regs.lo : regs.hi) >>> (8 * (ch % 4))) & 255; }
+  function chThreshold(ch, P) {
+    var p = P === undefined ? regs.period : P;
+    var d = chDuty(ch);
+    return d === 255 ? p : Math.floor(d * p / 256);
+  }
+  function chFraction(ch) {
+    if (!(regs.ctrl & 1) || regs.period === 0) return 0;
+    return Math.min(1, chThreshold(ch) / regs.period);
+  }
+  $("trPause").addEventListener("click", function () {
+    trace.paused = !trace.paused;
+    this.textContent = trace.paused ? "Resume" : "Pause";
+  });
+  $("trClear").addEventListener("click", function () { $("trBody").textContent = ""; trace.rows = 0; });
+
+  /* ===================== LEDs, switches, presets ===================== */
+  var ledEls = [], swEls = [], pctEls = [];
+  (function build() {
+    var leds = $("leds"), sws = $("switches");
+    for (var n = 7; n >= 0; n--) {
+      var l = document.createElement("div"); l.className = "led";
+      l.innerHTML = '<i></i><span>0%</span><b>LD' + n + '</b>';
+      leds.appendChild(l);
+      ledEls[n] = l.querySelector("i"); pctEls[n] = l.querySelector("span");
+
+      var s = document.createElement("div"); s.className = "sw";
+      s.innerHTML = '<button type="button" aria-pressed="false" aria-label="Switch SW' + n + '"><i></i></button><b>SW' + n + '</b>';
+      sws.appendChild(s);
+      swEls[n] = s.querySelector("button");
+      (function (bit, btn) {
+        btn.addEventListener("click", function () { setSwitches(sw ^ (1 << bit), true); });
+      })(n, swEls[n]);
+    }
+    var pr = $("presets");
+    [0, 32, 64, 128, 192, 255].forEach(function (v) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "preset"; b.textContent = v;
+      b.setAttribute("aria-label", "Set switches to " + v);
+      b.addEventListener("click", function () { setSwitches(v, true); });
+      pr.appendChild(b);
+    });
+  })();
+  function setSwitches(v, byUser) {
+    sw = v & 255;
+    if (byUser) ev.swSets++;
+    for (var n = 0; n < 8; n++) swEls[n].setAttribute("aria-pressed", (sw >> n) & 1 ? "true" : "false");
+    $("swDec").textContent = sw;
+    $("swBin").textContent = ("00000000" + sw.toString(2)).slice(-8);
+  }
+
+  /* ===================== BTNC interrupt service routine ===================== */
+  var lastAccepted = -1e9;
+  function isrEdge(level) {
+    var now = performance.now();
+    hl("isr", ["entry", "read"]);
+    pulse(["w_btnio", "w_irq", "w_gic"], 60);
+    var quiet = (now - lastEvent) > DEBOUNCE_MS;
+    var accepted = !!(level && quiet);
+    if (isrVariant === "B") lastEvent = now;               /* every edge restarts the window */
+    else if (accepted) lastEvent = now;                    /* only an accepted press does */
+    hl("isr", ["test"]);
+    if (isrVariant === "B") hl("isr", ["last"]);
+    if (accepted) {
+      mode ^= 1; modeChanged = true;
+      hl("isr", ["toggle"]);
+      ev.accepted++;
+      print("[ISR] BTNC press accepted -> mode " + mode, "isr");
+      if (!physPressed) {
+        ev.doubleToggle++;
+        print("[ISR] ! toggled on release bounce: the button was already released (version A weakness)", "warn");
+      }
+      lastAccepted = now;
+    } else if (level) {
+      ev.ignoredRise++;
+      print("[ISR] edge ignored (inside 100 ms debounce window)", "isr dim");
+    }
+    hl("isr", ["exit"]);
+  }
+  var btn = $("btnc"), timers = [];
+  function later(ms, fn) { timers.push(setTimeout(fn, ms)); }
+  function press() {
+    if (physPressed) return;
+    physPressed = true; btn.classList.add("down");
+    timers.forEach(clearTimeout); timers = [];
+    if ($("bounce").checked) {
+      isrEdge(1);
+      later(2, function () { isrEdge(0); });
+      later(5, function () { isrEdge(1); });
+      later(7, function () { isrEdge(0); });
+      later(10, function () { isrEdge(1); });
+    } else isrEdge(1);
+  }
+  function release() {
+    if (!physPressed) return;
+    physPressed = false; btn.classList.remove("down");
+    if ($("bounce").checked) {
+      isrEdge(0);
+      later(2, function () { isrEdge(1); });
+      later(4, function () { isrEdge(0); });
+    } else isrEdge(0);
+  }
+  btn.addEventListener("pointerdown", function (e) { e.preventDefault(); try { btn.setPointerCapture(e.pointerId); } catch (x) {} press(); });
+  btn.addEventListener("pointerup", release);
+  btn.addEventListener("pointercancel", release);
+  btn.addEventListener("keydown", function (e) { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); press(); } });
+  btn.addEventListener("keyup", function (e) { if (e.key === " " || e.key === "Enter") { e.preventDefault(); release(); } });
+  btn.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  $("isrVar").addEventListener("change", function () {
+    isrVariant = this.value; renderIsr();
+    print("[sim] ISR debounce version " + isrVariant + " selected", "isr dim");
+  });
+
+  /* ===================== PS main loop (same structure as main.c) ===================== */
+  var lastSw = -1, breath = 0, dir = 1, tick = 0, loopTimer = null;
+  function mainLoop() {
+    var wait;
+    if (mode === 0) {
+      hl("main", ["m_if"]);
+      if (sw !== lastSw || modeChanged) {
+        hl("main", ["m_read"]);
+        pulse(["w_swio", "w_sw", "w_bus"]);
+        pwmSetAll(sw, "pwm_set_all(sw) · main loop, manual mode");
+        hl("main", ["m_write", "m_print"]);
+        status(0, sw); lastSw = sw; modeChanged = false;
+      }
+      wait = MANUAL_POLL_MS;
+    } else {
+      if (modeChanged) {
+        breath = 0; dir = 1; tick = 0; ev.maxBreath = 0;
+        hl("main", ["b_init"]);
+        status(1, 0); modeChanged = false;
+      }
+      var show = (tick % 8) === 0;
+      pwmSetAll(Math.floor(breath * breath / 255), "pwm_set_all(breath²/255) · breathing, breath = " + breath, !show);
+      if (show) hl("main", ["b_write", "b_step"]);
+      breath += dir;
+      if (breath >= 255) { breath = 255; dir = -1; }
+      if (breath <= 0) { breath = 0; dir = 1; }
+      if (breath > ev.maxBreath) ev.maxBreath = breath;
+      tick++;
+      if ((tick & 63) === 0) { status(1, breath); hl("main", ["b_print"]); }
+      lastSw = -1;
+      wait = BREATH_STEP_MS;
+    }
+    loopTimer = setTimeout(mainLoop, wait);
+  }
+
+  function boot() {
+    setSwitches(0, false);
+    pwmWrite("period", scaled ? SIM_PERIOD : REAL_PERIOD, "pwm_write(PWM_REG_PERIOD, …) · main() start-up");
+    pwmSetAll(0, "pwm_set_all(0) · main() start-up");
+    pwmWrite("ctrl", 1, "pwm_write(PWM_REG_CTRL, 1) · enable the PWM IP");
+    print("--- Lab 2: PWM LED + BTNC interrupt ---");
+    clearTimeout(loopTimer);
+    loopTimer = setTimeout(mainLoop, 50);
+  }
+  function resetBoard() {
+    timers.forEach(clearTimeout); timers = [];
+    physPressed = false; btn.classList.remove("down");
+    mode = 0; modeChanged = true; lastSw = -1; breath = 0; dir = 1; tick = 0; lastEvent = -1e9;
+    term.textContent = "";
+    regs.lo = 0; regs.hi = 0;
+    boot();
+  }
+  $("resetBoard").addEventListener("click", resetBoard);
+
+  /* ===================== time scale ===================== */
+  function applyScaleUi() {
+    $("scReal").setAttribute("aria-pressed", scaled ? "false" : "true");
+    $("scSim").setAttribute("aria-pressed", scaled ? "true" : "false");
+    $("ledHdr").textContent = scaled ? "PWM 100 kHz (testbench) · 8 channels" : "PWM 1 kHz · 8 channels";
+  }
+  function setScale(on) {
+    if (scaled === on) return;
+    scaled = on;
+    pwmWrite("period", on ? SIM_PERIOD : REAL_PERIOD, on ? "time scale: testbench value, PERIOD = 1000" : "time scale: real design value, PERIOD = 100000");
+    print("[sim] PERIOD register = " + regs.period + " (" + fmtHz(CLK_HZ / regs.period) + ")", "isr dim");
+    applyScaleUi();
+  }
+  $("scReal").addEventListener("click", function () { setScale(false); });
+  $("scSim").addEventListener("click", function () { setScale(true); });
+
+  /* ===================== scope (3 PWM periods of LD0) ===================== */
+  var cv = $("scope"), ctx = cv.getContext("2d");
+  function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function sizeCanvas(c) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = c.clientWidth, h = c.clientHeight;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+    }
+    return { w: w, h: h, dpr: dpr };
+  }
+  function drawScope() {
+    var s = sizeCanvas(cv), w = s.w, h = s.h;
+    ctx.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var padL = 10, padR = 10, top = 28, bot = h - 28, pw = (w - padL - padR) / 3;
+    ctx.strokeStyle = cssVar("--scope-grid"); ctx.lineWidth = 1; ctx.fillStyle = cssVar("--term-dim");
+    ctx.font = "11px " + cssVar("--font-mono");
+    var pu = periodUs();
+    for (var i = 0; i <= 3; i++) {
+      var x = Math.round(padL + i * pw) + .5;
+      ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, h - 16); ctx.stroke();
+      ctx.textAlign = i === 0 ? "left" : (i === 3 ? "right" : "center");
+      ctx.fillText(i === 0 ? "0" : fmtTime(pu * i), x + (i === 0 ? 2 : (i === 3 ? -2 : 0)), h - 3);
+    }
+    var f = chFraction(0);
+    ctx.strokeStyle = cssVar("--scope-trace"); ctx.lineWidth = 2; ctx.lineJoin = "round";
+    ctx.beginPath();
+    if (f <= 0) { ctx.moveTo(padL, bot); ctx.lineTo(w - padR, bot); }
+    else if (f >= 1) { ctx.moveTo(padL, top); ctx.lineTo(w - padR, top); }
+    else {
+      for (var p = 0; p < 3; p++) {
+        var x0 = padL + p * pw, x1 = x0 + pw * f, x2 = x0 + pw;
+        if (p === 0) ctx.moveTo(x0, top); else ctx.lineTo(x0, top);
+        ctx.lineTo(x1, top); ctx.lineTo(x1, bot); ctx.lineTo(x2, bot);
+        if (p < 2) ctx.lineTo(x2, top);
+      }
+    }
+    ctx.stroke();
+    ctx.fillStyle = cssVar("--term-dim"); ctx.textAlign = "left";
+    ctx.fillText("high", 12, top - 8 < 10 ? 10 : top - 8);
+  }
+
+  /* ===================== math panel ===================== */
+  function updateMath() {
+    var d = chDuty(0), P = regs.period, thr = chThreshold(0, P);
+    var enabled = (regs.ctrl & 1) === 1;
+    var src = mode === 0 ? "from the switches (sw = " + sw + ")" : "from the breathing ramp, breath = " + breath + " → " + breath + "² / 255";
+    setText($("mEq1"), "d = " + d);
+    setText($("mWhy1"), "The software writes this byte into the DUTY register " + src + ". One byte per LED, 0 to 255.");
+    setText($("mEq2"), d === 255 ? "threshold = PERIOD = " + P + "   (d = 255 is special-cased: always on)"
+                                  : "threshold = floor(d × PERIOD / 256) = floor(" + d + " × " + P + " / 256) = " + thr);
+    setText($("mWhy2"), d === 255 ? "Dividing by 256 could never reach 100 %, so the RTL forces full-on at 255."
+                                   : "The IP multiplies, then drops the low 8 bits (÷ 256). That is why a byte of 128 means exactly half.");
+    var hi = enabled ? thr : 0, lo = P - hi;
+    setText($("mEq3"), "counter runs 0 … " + (P - 1) + ";  pin = 1 while counter < " + hi + "  →  high " + hi + " clocks, low " + lo + " clocks");
+    $("mBarHi").style.width = (P ? hi / P * 100 : 0) + "%";
+    $("mBarLo").style.width = (P ? lo / P * 100 : 0) + "%";
+    setText($("mWhy3"), enabled ? "The counter restarts every period. The bar shows one period: green is the part where the pin is high."
+                                : "CTRL bit 0 is 0, so the IP is disabled and the pin stays low.");
+    var pct = P ? hi / P * 100 : 0;
+    setText($("mEq4"), "duty = " + hi + " / " + P + " = " + pct.toFixed(2) + " %      (d / 256 = " + (d / 256 * 100).toFixed(2) + " %)");
+    setText($("mWhy4"), "The two numbers match except at d = 255, where the special case gives 100 %.");
+    setText($("mEq5"), "high time = " + hi + " × 10 ns = " + fmtTime(hi * 10 / 1000) + "   of a " + fmtTime(periodUs()) + " period  (" + fmtHz(CLK_HZ / P) + ")");
+    setText($("mWhy5"), "Your eye averages the fast flicker, so " + pct.toFixed(0) + " % duty looks like a dimmer LED, not a blinking one.");
+  }
+  function updateCalc() {
+    var d = Math.max(0, Math.min(255, Math.floor(Number($("calcD").value) || 0)));
+    var P = Math.max(1, Math.floor(Number($("calcP").value) || 1));
+    var thr = d === 255 ? P : Math.floor(d * P / 256);
+    $("calcOut").textContent = "threshold = " + thr + " clocks → duty " + (thr / P * 100).toFixed(2) + " %, high " + fmtTime(thr * 10 / 1000) + " of " + fmtTime(P * 10 / 1000) + " (" + fmtHz(CLK_HZ / P) + ")";
+  }
+  $("calcD").addEventListener("input", updateCalc);
+  $("calcP").addEventListener("input", updateCalc);
+  updateCalc();
+
+  /* ===================== slow motion ===================== */
+  var N = 64;
+  var sm = { tick: 0, playing: false, rate: 12, acc: 0, hist: [] };
+  var smCv = $("slowcv"), smCtx = smCv.getContext("2d");
+  function smStep() {
+    var d = chDuty(0);
+    var thr = (regs.ctrl & 1) ? (d === 255 ? N : Math.floor(d * N / 256)) : 0;
+    var c = sm.tick % N, out = c < thr ? 1 : 0;
+    sm.hist.push({ c: c, thr: thr, out: out });
+    if (sm.hist.length > 3 * N) sm.hist.shift();
+    sm.tick++; ev.slowSteps++;
+  }
+  function drawSlow() {
+    var s = sizeCanvas(smCv), w = s.w, h = s.h;
+    smCtx.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
+    smCtx.clearRect(0, 0, w, h);
+    var mono = cssVar("--font-mono");
+    smCtx.font = "11px " + mono;
+    var grid = cssVar("--scope-grid"), trace = cssVar("--scope-trace"), alt = cssVar("--scope-alt"), dim = cssVar("--term-dim");
+    var padL = 44, padR = 10, topA = 20, botA = 130, topB = 158, botB = 206;
+    var W = 2 * N, pw = (w - padL - padR) / (W - 1);
+    smCtx.textAlign = "left"; smCtx.fillStyle = dim;
+    smCtx.fillText("counter (0 … 63) and threshold", padL, 12);
+    smCtx.fillText("output pin", padL, topB - 8);
+    smCtx.strokeStyle = grid; smCtx.lineWidth = 1;
+    [0, 32, 63].forEach(function (v) {
+      var y = botA - (botA - topA) * v / 63;
+      smCtx.beginPath(); smCtx.moveTo(padL, y); smCtx.lineTo(w - padR, y); smCtx.stroke();
+      smCtx.textAlign = "right"; smCtx.fillText(String(v), padL - 6, y + 4);
+    });
+    smCtx.textAlign = "right"; smCtx.fillText("1", padL - 6, topB + 4); smCtx.fillText("0", padL - 6, botB + 4);
+    if (!sm.hist.length) {
+      smCtx.textAlign = "center"; smCtx.fillStyle = dim;
+      smCtx.fillText("Press Step or Play", (w + padL) / 2, (topA + botA) / 2);
+      return;
+    }
+    var hist = sm.hist.slice(-W), off = 0;
+    function X(i) { return padL + (off + i) * pw; }
+    function Yc(c) { return botA - (botA - topA) * c / 63; }
+    /* period boundaries */
+    smCtx.strokeStyle = grid;
+    for (var i = 0; i < hist.length; i++) {
+      if (hist[i].c === 0) { smCtx.beginPath(); smCtx.moveTo(X(i), topA - 4); smCtx.lineTo(X(i), botB + 6); smCtx.stroke(); }
+    }
+    /* threshold */
+    var last = hist[hist.length - 1];
+    smCtx.strokeStyle = alt; smCtx.setLineDash([5, 4]); smCtx.lineWidth = 1.5;
+    smCtx.beginPath();
+    for (i = 0; i < hist.length; i++) {
+      var yt = Yc(Math.min(63, hist[i].thr));
+      if (i === 0) smCtx.moveTo(X(i), yt); else smCtx.lineTo(X(i), yt);
+    }
+    smCtx.stroke(); smCtx.setLineDash([]);
+    /* counter */
+    smCtx.strokeStyle = trace; smCtx.lineWidth = 2;
+    smCtx.beginPath();
+    for (i = 0; i < hist.length; i++) {
+      if (i === 0) smCtx.moveTo(X(i), Yc(hist[i].c));
+      else if (hist[i].c === 0) { smCtx.moveTo(X(i), Yc(0)); }
+      else smCtx.lineTo(X(i), Yc(hist[i].c));
+    }
+    smCtx.stroke();
+    /* output */
+    smCtx.strokeStyle = trace; smCtx.lineWidth = 2;
+    smCtx.beginPath();
+    for (i = 0; i < hist.length; i++) {
+      var yo = hist[i].out ? topB : botB;
+      if (i === 0) smCtx.moveTo(X(i), yo); else { smCtx.lineTo(X(i), yo === undefined ? botB : (hist[i - 1].out ? topB : botB)); smCtx.lineTo(X(i), yo); }
+    }
+    smCtx.stroke();
+    /* now marker */
+    var xn = X(hist.length - 1);
+    smCtx.strokeStyle = cssVar("--fg"); smCtx.lineWidth = 1;
+    smCtx.beginPath(); smCtx.moveTo(xn, topA - 4); smCtx.lineTo(xn, botB + 6); smCtx.stroke();
+    smCtx.fillStyle = alt; smCtx.textAlign = "left";
+    smCtx.textAlign = "right"; smCtx.fillText("threshold (dashed)", w - padR, 12);
+  }
+  function updateSlow(dt) {
+    if (sm.playing) {
+      sm.acc += dt * sm.rate;
+      while (sm.acc >= 1) { smStep(); sm.acc -= 1; }
+    }
+    var last = sm.hist[sm.hist.length - 1];
+    setText($("smC"), last ? String(last.c) : "–");
+    setText($("smT"), last ? String(last.thr) : "–");
+    setText($("smO"), last ? (last.c + " < " + last.thr + " → " + (last.out ? "yes" : "no")) : "–");
+    setText($("smPin"), last ? (last.out ? "1 (high)" : "0 (low)") : "–");
+    var d = chDuty(0);
+    setText($("smNote"), "LD0 duty byte d = " + d + " → threshold = " + (d === 255 ? "64 (always on)" : "floor(" + d + " × 64 / 256) = " + Math.floor(d * N / 256)) + " of 64 steps. The real RTL does the same comparison on a counter that runs 0 … " + (regs.period - 1) + ".");
+    drawSlow();
+  }
+  $("smPlay").addEventListener("click", function () {
+    sm.playing = !sm.playing; this.textContent = sm.playing ? "Pause" : "Play"; sm.acc = 0;
+  });
+  $("smStep").addEventListener("click", function () { smStep(); });
+  $("smStep8").addEventListener("click", function () { for (var i = 0; i < 8; i++) smStep(); });
+  $("smReset").addEventListener("click", function () { sm.tick = 0; sm.hist = []; sm.acc = 0; });
+  $("smRate").addEventListener("input", function () { sm.rate = Number(this.value); $("smRateV").textContent = sm.rate + " steps/s"; });
+
+  /* ===================== system diagram ===================== */
+  var NODES = [
+    { id: "n_ps",   x: 14,  y: 40,  w: 210, h: 300, g: 1, t: "Zynq PS · Cortex-A9", s: "runs the C program", ty: 58,
+      info: ["Zynq processing system", "The ARM Cortex-A9 runs the C program: a main loop plus the button ISR. It reaches the PL peripherals with memory-mapped AXI4-Lite reads and writes through its M_AXI_GP0 port. The FPGA clock FCLK_CLK0 is 100 MHz."] },
+    { id: "n_main", x: 30,  y: 80,  w: 178, h: 70, t: "main loop", s: "switches → duty", ty: 108,
+      info: ["Main loop", "In manual mode it reads the switches, and when they change it writes the duty to the PWM IP and prints a status line. In breathing mode it ramps the duty every 4 ms. It never reads the button: the button is handled by the interrupt."] },
+    { id: "n_isr",  x: 30,  y: 170, w: 178, h: 56, t: "BtnIsr()", s: "debounce + mode toggle", ty: 196,
+      info: ["BtnIsr(), the button ISR", "Runs when the button GPIO raises its interrupt. It reads the button level, applies the 100 ms debounce window and toggles g_mode on an accepted press. The main loop notices the new mode on its next pass."] },
+    { id: "n_gic",  x: 30,  y: 262, w: 178, h: 56, t: "GIC", s: "IRQ_F2P[0] = ID 61", ty: 288,
+      info: ["Generic Interrupt Controller", "Receives the PL interrupt IRQ_F2P[0] (interrupt ID 61 on Zynq-7000), prioritises it and makes the CPU call the handler registered with XScuGic_Connect()."] },
+    { id: "n_ic",   x: 296, y: 150, w: 120, h: 96, t: "AXI", s: "interconnect", ty: 190, g: 0,
+      info: ["AXI interconnect", "Connects the PS master port to the three slave peripherals and decodes the address: 0x4120_0000 switches, 0x4121_0000 button, 0x43C0_0000 PWM."] },
+    { id: "n_gsw",  x: 490, y: 36,  w: 150, h: 64, t: "AXI GPIO", s: "switches · 0x4120_0000", ty: 62,
+      info: ["AXI GPIO, switches", "An 8-bit input-only GPIO at 0x4120_0000. Reading its data register returns the slide switch value 0 … 255."] },
+    { id: "n_pwm",  x: 490, y: 146, w: 150, h: 76, t: "PWM controller", s: "custom IP · 0x43C0_0000", ty: 174,
+      info: ["PWM controller (custom IP)", "Registers: CTRL 0x00, PERIOD 0x04, DUTY_LO 0x08 (LD3 … LD0), DUTY_HI 0x0C (LD7 … LD4). A counter runs 0 … PERIOD − 1; each of the 8 outputs is high while the counter is below its threshold. PERIOD 100000 at 100 MHz gives 1 kHz."] },
+    { id: "n_gbt",  x: 490, y: 268, w: 150, h: 64, t: "AXI GPIO", s: "button · 0x4121_0000", ty: 294,
+      info: ["AXI GPIO, button", "A 1-bit input GPIO at 0x4121_0000 with its interrupt enabled. Any change of BTNC raises ip2intc_irpt, which is wired to the PS pin IRQ_F2P."] },
+    { id: "n_sw",   x: 690, y: 36,  w: 76,  h: 64, t: "SW7–0", s: "slide switches", ty: 64,
+      info: ["Slide switches", "Eight slide switches on the board, pins F22, G22, H22, F21, H19, H18, H17, M15 (1.8 V)."] },
+    { id: "n_led",  x: 690, y: 146, w: 76,  h: 76, t: "LD7–0", s: "LEDs", ty: 178,
+      info: ["User LEDs", "Eight LEDs driven directly by the PWM outputs, pins T22, T21, U22, U21, V22, W22, U19, U14 (3.3 V)."] },
+    { id: "n_btc",  x: 690, y: 268, w: 76,  h: 64, t: "BTNC", s: "centre button", ty: 296,
+      info: ["Centre push button", "BTNC on pin P16 (1.8 V). A mechanical contact: it bounces for a few milliseconds when pressed or released."] }
+  ];
+  var WIRES = [
+    { id: "w_bus",   d: "M208 115 H252 V198 H296" },
+    { id: "w_sw",    d: "M416 168 H452 V68 H490" },
+    { id: "w_pwm",   d: "M416 198 H490" },
+    { id: "w_bt",    d: "M416 228 H452 V300 H490" },
+    { id: "w_swio",  d: "M640 68 H690", rev: 1 },
+    { id: "w_pwmio", d: "M640 184 H690" },
+    { id: "w_btnio", d: "M690 300 H640", rev: 1 },
+    { id: "w_irq",   d: "M565 332 V366 H119 V318", irq: 1 },
+    { id: "w_gic",   d: "M119 262 V226", irq: 1 }
+  ];
+  (function buildSystem() {
+    var svg = $("sysSvg"), h = "";
+    h += '<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="var(--muted)"/></marker></defs>';
+    WIRES.forEach(function (w) {
+      h += '<path id="' + w.id + '" class="wire' + (w.irq ? " irq" : "") + '" d="' + w.d + '" marker-end="url(#ah)"/>';
+    });
+    h += '<text class="wlabel" x="300" y="383">IRQ_F2P[0]: interrupt from the button GPIO to the PS</text>';
+    h += '<text class="wlabel" x="226" y="108">AXI4-Lite</text>';
+    NODES.forEach(function (n) {
+      h += '<g class="node' + (n.g ? " group" : "") + '" id="' + n.id + '" tabindex="0" role="button" aria-label="' + n.info[0] + '">';
+      h += '<rect x="' + n.x + '" y="' + n.y + '" width="' + n.w + '" height="' + n.h + '" rx="8"/>';
+      h += '<text x="' + (n.x + n.w / 2) + '" y="' + n.ty + '" text-anchor="middle">' + n.t + '</text>';
+      h += '<text class="s" x="' + (n.x + n.w / 2) + '" y="' + (n.ty + 15) + '" text-anchor="middle">' + n.s + '</text></g>';
+    });
+    svg.innerHTML = h;
+    NODES.forEach(function (n) {
+      var g = $(n.id);
+      function show() {
+        NODES.forEach(function (m) { $(m.id).classList.remove("sel"); });
+        g.classList.add("sel");
+        $("sysInfo").innerHTML = "<h3></h3><p></p>";
+        $("sysInfo").firstChild.textContent = n.info[0];
+        $("sysInfo").lastChild.textContent = n.info[1];
+      }
+      g.addEventListener("click", show);
+      g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); show(); } });
+    });
+  })();
+  /* node highlight follows wire pulses */
+  var WIRE_NODES = { w_bus: ["n_main", "n_ic"], w_sw: ["n_gsw"], w_pwm: ["n_pwm"], w_swio: ["n_sw"], w_pwmio: ["n_led"], w_btnio: ["n_btc", "n_gbt"], w_irq: ["n_gbt"], w_gic: ["n_gic", "n_isr"] };
+  var origPulse = pulse;
+  pulse = function (ids, gap) {
+    origPulse(ids, gap);
+    ids.forEach(function (id) {
+      (WIRE_NODES[id] || []).forEach(function (nid) {
+        var el = document.getElementById(nid);
+        if (!el) return;
+        el.classList.add("on");
+        clearTimeout(el._t);
+        el._t = setTimeout(function () { el.classList.remove("on"); }, 450);
+      });
+    });
+  };
+
+  /* ===================== tabs ===================== */
+  var tabBtns = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  function openTab(name, focus) {
+    tabBtns.forEach(function (b) {
+      var on = b.getAttribute("data-tab") === name;
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1;
+      var p = $(b.getAttribute("aria-controls"));
+      p.hidden = !on;
+      if (on && focus) b.focus();
+    });
+    ev.tabs[name] = (ev.tabs[name] || 0) + 1;
+    if (name === "slow") sm.acc = 0;
+  }
+  tabBtns.forEach(function (b, i) {
+    b.addEventListener("click", function () { openTab(b.getAttribute("data-tab")); });
+    b.addEventListener("keydown", function (e) {
+      var j = -1;
+      if (e.key === "ArrowRight") j = (i + 1) % tabBtns.length;
+      else if (e.key === "ArrowLeft") j = (i + tabBtns.length - 1) % tabBtns.length;
+      else if (e.key === "Home") j = 0;
+      else if (e.key === "End") j = tabBtns.length - 1;
+      if (j >= 0) { e.preventDefault(); openTab(tabBtns[j].getAttribute("data-tab"), true); }
+    });
+  });
+
+  /* ===================== guided lessons ===================== */
+  var base = null;
+  function snap() {
+    return { swSets: ev.swSets, accepted: ev.accepted, ignoredRise: ev.ignoredRise, doubleToggle: ev.doubleToggle, slowSteps: ev.slowSteps,
+             tabs: JSON.parse(JSON.stringify(ev.tabs)) };
+  }
+  var LESSONS = [
+    { t: "Flip a switch",
+      goal: "Each of the 8 slide switches is one bit. Together they make a number from 0 to 255, and the software turns that number into LED brightness.",
+      doit: "Flip any switch up, or press a preset such as 64.",
+      watch: "The LEDs change brightness, the console prints “Mode: MANUAL | Duty: n”, and the DUTY registers change.",
+      open: ["console", "Open console"],
+      check: function () { return ev.swSets - base.swSets >= 1 && sw > 0; } },
+    { t: "Why 128 is 50 %",
+      goal: "The PWM IP compares a free-running counter with a threshold = duty × PERIOD / 256. The pin is high while the counter is below the threshold.",
+      doit: "Press the 128 preset, then open the “Show me the math” tab.",
+      watch: "Threshold = 128 × 100000 / 256 = 50000, so the pin is high for half of every period.",
+      open: ["math", "Open the math"],
+      check: function () { return sw === 128 && (ev.tabs.math || 0) - (base.tabs.math || 0) >= 1; } },
+    { t: "A button press is an interrupt",
+      goal: "BTNC raises an interrupt. The ISR runs at once and toggles the mode, while the main loop never polls the button.",
+      doit: "Press and release BTNC once. Untick “contact bounce” first if you want to see a clean press.",
+      watch: "A “[ISR] BTNC press accepted” line, the mode badge changing, and the wires lighting up on the System tab.",
+      open: ["system", "Open the system view"],
+      check: function () { return ev.accepted - base.accepted >= 1; } },
+    { t: "Contact bounce",
+      goal: "A real push button chatters for a few milliseconds. Without debouncing, one press could toggle the mode several times.",
+      doit: "Tick “Simulate contact bounce”, then tap BTNC briefly.",
+      watch: "One accepted press, then “edge ignored” lines: the ISR rejects the extra edges inside its 100 ms window.",
+      open: ["console", "Open console"],
+      check: function () { return $("bounce").checked && ev.ignoredRise - base.ignoredRise >= 1; } },
+    { t: "Breathing mode",
+      goal: "In mode 1 the software ramps the duty up and down. Brightness follows duty = breath² / 255, which looks smoother to the eye than a straight ramp.",
+      doit: "Make sure the badge says BREATHING (press BTNC if not) and wait for the ramp to pass about half brightness.",
+      watch: "The LEDs fade in and out, the console prints the duty every 64 steps, and the math tab follows the ramp.",
+      open: ["math", "Open the math"],
+      check: function () { return mode === 1 && ev.maxBreath >= 128; } },
+    { t: "Slow motion: the counter",
+      goal: "The real counter runs 100000 steps per period, far too fast to watch. The slow-motion view draws one period as 64 steps.",
+      doit: "Open Slow motion and press Step at least 10 times, or press Play.",
+      watch: "The counter climbs 0 … 63, and the output pin is high while the counter is below the threshold.",
+      open: ["slow", "Open slow motion"],
+      check: function () { return ev.slowSteps - base.slowSteps >= 10; } },
+    { t: "Experiment: two debounce versions",
+      goal: "Version A (as built in main.c) restarts its quiet window only on an accepted press. Version B restarts it on every edge. They differ when you hold the button.",
+      doit: "Choose version A, keep bounce on, press and hold BTNC for about half a second, then release.",
+      watch: "With A the release bounce can toggle the mode a second time and a warning line appears. Switch to B and repeat: only one toggle.",
+      open: ["code", "Open the code"],
+      check: function () { return ev.doubleToggle - base.doubleToggle >= 1; } }
+  ];
+  var lesson = { i: 0, done: [] };
+  var dotsEl = $("dots");
+  LESSONS.forEach(function (L, i) {
+    var b = document.createElement("button");
+    b.type = "button"; b.textContent = i + 1; b.setAttribute("aria-label", "Lesson " + (i + 1) + ": " + L.t);
+    b.addEventListener("click", function () { gotoLesson(i); });
+    dotsEl.appendChild(b);
+  });
+  function gotoLesson(i) {
+    lesson.i = Math.max(0, Math.min(LESSONS.length - 1, i));
+    base = snap(); ev.maxBreath = mode === 1 ? Math.max(0, ev.maxBreath) : 0;
+    if (mode === 1) ev.maxBreath = breath;
+    renderLesson();
+  }
+  function renderLesson() {
+    var L = LESSONS[lesson.i];
+    $("lnum").textContent = (lesson.i + 1) + " / " + LESSONS.length;
+    $("ltitle").textContent = L.t;
+    $("lgoal").textContent = L.goal; $("ldo").textContent = L.doit; $("lwatch").textContent = L.watch;
+    $("lopen").textContent = L.open[1];
+    $("lopen").onclick = function () { openTab(L.open[0]); };
+    Array.prototype.forEach.call(dotsEl.children, function (b, i) {
+      if (i === lesson.i) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
+      b.classList.toggle("done", !!lesson.done[i]);
+    });
+    $("lprev").disabled = lesson.i === 0;
+    $("lnext").disabled = lesson.i === LESSONS.length - 1;
+    $("lnext").className = lesson.done[lesson.i] ? "btn primary" : "btn";
+    updateLessonStatus();
+  }
+  function updateLessonStatus() {
+    var ok = !!lesson.done[lesson.i];
+    $("lstatus").classList.toggle("ok", ok);
+    setText($("lmark"), ok ? "Done ✓  Nice, move on when you are ready." : "Waiting for you…");
+  }
+  function checkLesson() {
+    var i = lesson.i;
+    if (!lesson.done[i] && LESSONS[i].check()) {
+      lesson.done[i] = true;
+      renderLesson();
+    }
+  }
+  $("lprev").addEventListener("click", function () { gotoLesson(lesson.i - 1); });
+  $("lnext").addEventListener("click", function () { gotoLesson(lesson.i + 1); });
+
+  /* ===================== quiz ===================== */
+  var QUIZ = [
+    { q: "The switches are set to 64. What duty cycle does LED0 get?", o: ["12.5 %", "25 %", "50 %", "64 %"], a: 1,
+      why: "duty = 64 / 256 = 0.25. The threshold is 64 × 100000 / 256 = 25000 of 100000 clocks." },
+    { q: "Which switch value gives a full 100 % duty?", o: ["128", "254", "255", "256"], a: 2,
+      why: "Dividing by 256 can never reach 100 %, so the RTL special-cases a duty byte of 255 as always on. A byte cannot hold 256." },
+    { q: "PERIOD = 100000 and the PL clock is 100 MHz. What is the PWM frequency?", o: ["100 Hz", "1 kHz", "10 kHz", "100 kHz"], a: 1,
+      why: "100 MHz / 100000 = 1000 Hz. In the Vivado testbenches PERIOD is 1000, giving 100 kHz, only to keep the simulation short." },
+    { q: "If PERIOD were halved to 50000 at the same duty byte, what happens?", o: ["Frequency doubles, duty % unchanged", "Duty % halves", "The LED turns off", "Frequency halves"], a: 0,
+      why: "Both the period and the threshold scale with PERIOD, so the ratio stays the same. Only the frequency changes: 100 MHz / 50000 = 2 kHz." },
+    { q: "Which register field sets the duty of LD5?", o: ["DUTY_LO bits 15:8", "DUTY_HI bits 15:8", "DUTY_HI bits 7:0", "CTRL bit 5"], a: 1,
+      why: "DUTY_LO holds LD0 … LD3 and DUTY_HI holds LD4 … LD7, one byte each. LD4 is bits 7:0 of DUTY_HI, so LD5 is bits 15:8." },
+    { q: "Why does the ISR ignore most edges when the button bounces?", o: ["The GIC drops them", "They arrive inside the 100 ms quiet window", "The main loop masks them", "The GPIO filters them in hardware"], a: 1,
+      why: "The ISR compares the time since the last edge (or accepted press) with the debounce window and only toggles when the button has been quiet for 100 ms." },
+    { q: "Why does breathing mode use duty = breath² / 255 instead of breath?", o: ["It uses less memory", "The eye perceives brightness non-linearly, so a squared curve looks smoother", "The PWM IP needs it", "It makes the loop faster"], a: 1,
+      why: "Perceived brightness is roughly a power law of the light output. A squared duty compensates, so the fade looks even instead of jumping quickly at the low end." },
+    { q: "What does this page prove about the real ZedBoard?", o: ["That it works on hardware", "Nothing by itself: it is a teaching simulation", "That the timing constraints are met", "That the bitstream is correct"], a: 1,
+      why: "It re-implements the logic in JavaScript. The evidence lives in the Vivado testbenches, the co-simulation and the C model, and a board run would still be needed to show real hardware behaviour." }
+  ];
+  var quiz = { answered: {}, score: 0 };
+  function renderQuiz() {
+    var box = $("qs"); box.textContent = ""; quiz = { answered: {}, score: 0 };
+    QUIZ.forEach(function (Q, qi) {
+      var d = document.createElement("div"); d.className = "q";
+      var p = document.createElement("p"); p.className = "qt"; p.textContent = (qi + 1) + ". " + Q.q; d.appendChild(p);
+      var opts = document.createElement("div"); opts.className = "opts"; d.appendChild(opts);
+      var fb = document.createElement("p"); fb.className = "fb"; fb.hidden = true; d.appendChild(fb);
+      Q.o.forEach(function (txt, oi) {
+        var b = document.createElement("button"); b.type = "button"; b.className = "opt"; b.textContent = txt;
+        b.addEventListener("click", function () {
+          if (quiz.answered[qi] !== undefined) return;
+          quiz.answered[qi] = oi;
+          var good = oi === Q.a;
+          if (good) quiz.score++;
+          Array.prototype.forEach.call(opts.children, function (c, ci) {
+            c.disabled = true;
+            if (ci === Q.a) c.classList.add("right");
+            else if (ci === oi) c.classList.add("wrong");
+          });
+          fb.hidden = false; fb.textContent = "";
+          var tag = document.createElement("b"); tag.className = good ? "ok" : "no"; tag.textContent = good ? "Correct. " : "Not quite. ";
+          fb.appendChild(tag); fb.appendChild(document.createTextNode(Q.why));
+          var n = Object.keys(quiz.answered).length;
+          $("qScore").textContent = "Score " + quiz.score + " / " + n + (n === QUIZ.length ? "  · finished" : "");
+        });
+        opts.appendChild(b);
+      });
+      box.appendChild(d);
+    });
+    $("qScore").textContent = "Score 0 / 0";
+  }
+  $("qReset").addEventListener("click", renderQuiz);
+  renderQuiz();
+
+  /* ===================== glossary ===================== */
+  var GLOSS = [
+    ["PWM", "Pulse-width modulation. A pin switches on and off fast; the share of time spent on sets the average brightness."],
+    ["Duty cycle", "The fraction of each period that the pin is high. Here duty byte d means d / 256."],
+    ["Period / PERIOD", "How long one PWM cycle lasts. PERIOD counts 10 ns clocks: 100000 clocks is 1 ms, so 1 kHz."],
+    ["Threshold", "The counter value below which the output is high: floor(d × PERIOD / 256)."],
+    ["AXI4-Lite", "A simple memory-mapped bus. The CPU reads and writes the PWM and GPIO registers through it."],
+    ["Register", "A word at a fixed address inside a peripheral. The PWM IP has CTRL, PERIOD, DUTY_LO and DUTY_HI."],
+    ["ISR", "Interrupt service routine: a function the CPU runs immediately when an interrupt arrives, here BtnIsr()."],
+    ["IRQ_F2P", "The PS input pins that take interrupts from the FPGA fabric (PL) into the GIC."],
+    ["GIC", "The Generic Interrupt Controller that routes interrupts to the CPU cores."],
+    ["Debounce", "Ignoring the extra edges a mechanical switch produces for a few milliseconds when it is pressed or released."],
+    ["Contact bounce", "The chatter of a switch contact as it settles: several quick on/off edges for one press."],
+    ["PS / PL", "Processing system (the ARM cores) and programmable logic (the FPGA fabric) of the Zynq."],
+    ["Testbench", "A simulation-only HDL file that drives the design with test inputs and checks the outputs."],
+    ["Co-simulation", "Running the software's recorded actions against the hardware model, here main_sim.c's trace replayed into the RTL."]
+  ];
+  (function () {
+    var dl = $("glist");
+    GLOSS.forEach(function (g) {
+      var dt = document.createElement("dt"); dt.textContent = g[0];
+      var dd = document.createElement("dd"); dd.textContent = g[1];
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  })();
+
+  /* ===================== main render loop ===================== */
+  var lastFrame = performance.now();
+  function frame(now) {
+    var dt = Math.min(0.25, (now - lastFrame) / 1000); lastFrame = now;
+    for (var n = 0; n < 8; n++) {
+      var fr = chFraction(n);
+      ledEls[n].style.setProperty("--b", Math.pow(fr, 0.55).toFixed(3));
+      setText(pctEls[n], Math.round(fr * 100) + "%");
+    }
+    var b = $("modeBadge");
+    var label = mode ? "BREATHING" : "MANUAL";
+    if (b.firstChild.nodeValue !== label) {
+      b.firstChild.nodeValue = label;
+      b.querySelector("small").textContent = "MODE " + mode;
+    }
+    var consoleOpen = !$("p-console").hidden;
+    if (consoleOpen) {
+      setText($("rCtrl"), hex(regs.ctrl)); setText($("rPeriod"), hex(regs.period));
+      setText($("rLo"), hex(regs.lo)); setText($("rHi"), hex(regs.hi));
+      var f0 = chFraction(0);
+      setText($("scDuty"), (f0 * 100).toFixed(1) + " %");
+      setText($("scHigh"), fmtTime(f0 * periodUs()));
+      setText($("scPeriod"), fmtTime(periodUs()));
+      drawScope();
+    }
+    if (!$("p-math").hidden) updateMath();
+    if (!$("p-slow").hidden) updateSlow(dt); else if (sm.playing) { sm.acc += dt * sm.rate; while (sm.acc >= 1) { smStep(); sm.acc -= 1; } }
+    if (!$("p-trace").hidden) setText($("trCount"), String(trace.total));
+    checkLesson();
+    requestAnimationFrame(frame);
+  }
+
+  /* ===================== start ===================== */
+  applyScaleUi();
+  boot();
+  gotoLesson(0);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
